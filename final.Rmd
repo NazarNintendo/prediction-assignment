@@ -1,0 +1,139 @@
+---
+title: "Practical Machine Learning - Prediction Assignment"
+author: "Nazar Kalinichenko"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("caret");
+```
+
+
+# Libraries used
+```{r}
+library(caret); library(ggplot2); library(ggcorrplot)
+```
+
+# Preparation
+
+## Get the data
+
+First of all we should set the working directory. I am going to set my at "Practical Machine Learning" folder in the home directory.
+
+```{r}
+setwd("~/Practical Machine Learning")
+```
+
+Next, put the data files in the folder we created and read them in the R environment.
+
+```{r}
+train <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+```
+
+Let's see the data (first 5 columns) to make sure everything loaded nicely.
+
+```{r}
+head(train[, 1:5])
+head(test[, 1:5])
+dim(train); dim(test)
+```
+
+## Preprocess the data
+
+### Near zero variance
+
+The next step is to pre-process the data. First, I will get rid of near zero variance variables, as they are approx. constant and do not contribute to the variable we are interested in.
+
+Let's see some info about columns that have near zero variance.
+
+```{r}
+nzv_metrics <- nearZeroVar(train, saveMetrics = TRUE)
+head(nzv_metrics, 10)
+```
+
+Now let's delete these columns from the data. As can be seen, it has deleted 60 columns.
+```{r}
+nzv <- nearZeroVar(train)
+train <- train[, -nzv]
+test <- test[, -nzv]
+dim(train); dim(test)
+```
+
+### Irrelevant columns
+Now I will delete the columns that clearly do not contribute to the "classe" variable. We have gotten rid of 5 more columns. 
+```{r}
+irrelevant_columns <- c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp")
+train <- train[,!names(train) %in% irrelevant_columns]
+test <- test[,!names(test) %in% irrelevant_columns]
+dim(train); dim(test)
+```
+
+### NA values
+Next up, I address the columns that have NA values by removing them. We are left with 19622 observations and 54 columns for the train set and 20 observations and 54 columns for the test set.
+```{r}
+cond <- colSums(is.na(train)) == 0
+train <- train[, cond]
+test <- test[, cond]
+dim(train); dim(test)
+```
+
+Before going into data splitting let's quickly visualize the correlation matrix of the pre-processed dataset ("classe" column removed) with ggcorplot package.
+```{r}
+ggcorrplot(cor(train[, -54]))
+```
+
+### Partition to validation set
+At last, we will partition our train set into train and validation sets with 80% and 20% respectively.
+```{r}
+train_old <- train
+inTrain <- createDataPartition(y=train_old$classe, p=0.80, list=FALSE)
+train <- train_old[inTrain,]
+validate <- train_old[-inTrain,]
+dim(train)
+dim(validate)
+```
+
+# Fitting the model
+
+The model we arg going to use will be Random Forest. It is a decently performant model for a problem of classification in ML.
+
+## Split the data for cross-validation
+We will use K-fold(10) method to split the data and use one of the folds each time to evaluating our model robustly. Then we will take the average value of our score.
+```{r}
+ctrl <- trainControl(method = "cv", number = 10)
+```
+
+## Fitting the model to the data
+
+We fill also pass the preProcess argument to center and scale our data.
+The execution may take some time depending on your CPU.
+
+```{r}
+modelFit <- train(classe ~ ., data = train, preProcess=c("center", "scale"), method = "rf", trControl = ctrl)
+modelFit
+```
+
+# Predict on the validation set
+Make our prediction and get confusion matrix.
+```{r}
+predictionRF <- predict(modelFit, validate)
+conf_mat <- confusionMatrix(
+  as.factor(validate$classe), 
+  as.factor(predictionRF))
+conf_mat
+```
+
+Let's get our out of sample error (estimation because it is still the validation set).
+```{r}
+out_sample_error <- 1 - as.numeric(conf_mat$overall[1])
+out_sample_error
+```
+
+# Predict on the test set
+
+```{r}
+predict(modelFit, test[, -54])
+```
